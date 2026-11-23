@@ -162,6 +162,12 @@ class ReconciliationApiIntegrationTest {
         mvc.perform(get("/api/v1/reconciliations/{id}", "00000000-0000-0000-0000-000000000000"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value("RUN_NOT_FOUND"));
+
+        String id = createSampleRun(1);
+        mvc.perform(get("/api/v1/reconciliations/{id}/items", id).param("limit", "501"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/reconciliations/{id}/items", id).param("status", "UNKNOWN"))
+                .andExpect(status().isBadRequest());
     }
 
     private static void assertLines(String csv, int expected) {

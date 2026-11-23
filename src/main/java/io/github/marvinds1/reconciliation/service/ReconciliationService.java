@@ -18,7 +18,9 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
 public class ReconciliationService {
@@ -28,13 +30,15 @@ public class ReconciliationService {
     private final ReconciliationRepository repository;
     private final EntryCsvParser parser;
     private final int defaultToleranceDays;
+    private final TransactionTemplate transaction;
 
-    public ReconciliationService(ReconciliationRepository repository,
+    public ReconciliationService(ReconciliationRepository repository, PlatformTransactionManager transactionManager,
                                  @Value("${reconciliation.max-rows-per-file}") int maxRows,
                                  @Value("${reconciliation.default-date-tolerance-days}") int defaultToleranceDays) {
         this.repository = repository;
         this.parser = new EntryCsvParser(maxRows);
         this.defaultToleranceDays = defaultToleranceDays;
+        this.transaction = new TransactionTemplate(transactionManager);
     }
 
     public record Outcome(ReconciliationRun run, boolean replayed) {
@@ -42,9 +46,9 @@ public class ReconciliationService {
 
     /**
      * Reconciles two files. Uploading the same pair of files with the same tolerance again returns
-     * the original run instead of creating a second one.
+     * the original run instead of creating a second one. Parsing and matching happen outside the
+     * database transaction so large files do not hold a connection.
      */
-    @Transactional
     public Outcome reconcile(UploadedFile ledgerFile, UploadedFile statementFile, Integer toleranceDays) {
         int tolerance = toleranceDays == null ? defaultToleranceDays : toleranceDays;
         if (tolerance < 0 || tolerance > MAX_TOLERANCE_DAYS) {
@@ -61,14 +65,16 @@ public class ReconciliationService {
         List<MatchResult> results = new Matcher(tolerance).match(ledger, statement);
         Summary summary = Summary.of(ledger.size(), statement.size(), results);
 
-        UUID id = UUID.randomUUID();
-        boolean inserted = repository.insertRunIfAbsent(id, hash, ledgerFile.name(), statementFile.name(),
-                tolerance, summary);
-        if (!inserted) {
-            return new Outcome(repository.findRunByHash(hash).orElseThrow(), true);
-        }
-        repository.insertItems(id, results);
-        return new Outcome(repository.findRun(id).orElseThrow(), false);
+        return transaction.execute(status -> {
+            UUID id = UUID.randomUUID();
+            boolean inserted = repository.insertRunIfAbsent(id, hash, ledgerFile.name(), statementFile.name(),
+                    tolerance, summary);
+            if (!inserted) {
+                return new Outcome(repository.findRunByHash(hash).orElseThrow(), true);
+            }
+            repository.insertItems(id, results);
+            return new Outcome(repository.findRun(id).orElseThrow(), false);
+        });
     }
 
     @Transactional(readOnly = true)

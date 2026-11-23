@@ -64,6 +64,13 @@ class EntryCsvParserTest {
     }
 
     @Test
+    void unterminatedQuoteIsAnInvalidFileNotAServerError() {
+        assertThatThrownBy(() -> parse("reference,value_date,amount,currency\n\"A,2026-11-02,1,IDR\n"))
+                .isInstanceOfSatisfying(InvalidFileException.class,
+                        e -> assertThat(e.errors().get(0)).startsWith("malformed CSV"));
+    }
+
+    @Test
     void enforcesRowLimit() {
         StringBuilder csv = new StringBuilder("reference,value_date,amount,currency\n");
         for (int i = 0; i < 101; i++) {

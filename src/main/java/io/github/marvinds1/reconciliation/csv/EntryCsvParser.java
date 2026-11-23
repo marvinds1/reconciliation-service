@@ -61,9 +61,7 @@ public final class EntryCsvParser {
                 throw new InvalidFileException(source, errors.subList(0, Math.min(errors.size(), MAX_REPORTED_ERRORS)));
             }
             return entries;
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        } catch (IllegalStateException | IllegalArgumentException e) {
+        } catch (IOException | UncheckedIOException | IllegalStateException | IllegalArgumentException e) {
             throw new InvalidFileException(source, List.of("malformed CSV: " + e.getMessage()));
         }
     }
