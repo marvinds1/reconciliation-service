@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: reconciliation-service
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/reconciliation}
+    username: ${DB_USERNAME:recon}
+    password: ${DB_PASSWORD:recon}
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 40MB
+  mvc:
+    problemdetails:
+      enabled: true
+
+reconciliation:
+  max-rows-per-file: 200000
+  default-date-tolerance-days: 1
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info

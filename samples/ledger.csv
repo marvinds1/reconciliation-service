@@ -1,0 +1,8 @@
+reference,value_date,amount,currency,description
+TRF-1001,2026-11-02,-1500000.00,IDR,Transfer to supplier A
+TRF-1002,2026-11-02,-250000.00,IDR,Utility payment
+TRF-1003,2026-11-02,-75000.00,IDR,Card fee
+DEP-2001,2026-11-02,5000000.00,IDR,Customer deposit
+TRF-1004,2026-11-03,-320000.00,IDR,Transfer to supplier B
+TRF-1005,2026-11-03,-99000.00,IDR,Subscription
+TRF-1006,2026-11-03,-1200.50,USD,Overseas vendor
