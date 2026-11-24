@@ -5,6 +5,14 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/reconciliation}
     username: ${DB_USERNAME:recon}
     password: ${DB_PASSWORD:recon}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      connection-timeout: 5000
+      data-source-properties:
+        reWriteBatchedInserts: true
+  jdbc:
+    template:
+      query-timeout: 30s
   servlet:
     multipart:
       max-file-size: 20MB
@@ -14,8 +22,15 @@ spring:
       enabled: true
 
 reconciliation:
+  api-keys: ${RECON_API_KEYS:}
   max-rows-per-file: 200000
+  max-concurrent-runs: ${RECON_MAX_CONCURRENT_RUNS:4}
   default-date-tolerance-days: 1
+
+server:
+  tomcat:
+    connection-timeout: 20s
+    max-swallow-size: 2MB
 
 management:
   endpoints:

@@ -20,5 +20,6 @@ services:
         condition: service_healthy
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/reconciliation
+      RECON_API_KEYS: ${RECON_API_KEYS:-}
     ports:
       - "8080:8080"

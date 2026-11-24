@@ -8,7 +8,9 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 class MatcherTest {
 
@@ -112,5 +114,33 @@ class MatcherTest {
     @Test
     void rejectsNegativeTolerance() {
         assertThatThrownBy(() -> new Matcher(-1)).isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void unreferencedLedgerEntryTakesTheEarliestLineOfTheDay() {
+        var referenced = new Entry(Source.STATEMENT, 5, "BANK-REF", DAY, 900, "IDR", "");
+        var unreferenced = new Entry(Source.STATEMENT, 9, "", DAY, 900, "IDR", "");
+
+        var results = matcher.match(List.of(ledger("", 900, DAY)), List.of(unreferenced, referenced));
+
+        assertThat(results.get(0).statement()).isSameAs(referenced);
+    }
+
+    @Test
+    @Timeout(value = 10, unit = TimeUnit.SECONDS)
+    void staysFastWhenThousandsOfEntriesShareAnAmount() {
+        int n = 200_000;
+        List<Entry> ledger = new ArrayList<>(n);
+        List<Entry> statement = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            ledger.add(new Entry(Source.LEDGER, i + 2, "L-" + i, DAY.plusDays(i % 5), -6500, "IDR", ""));
+            String ref = i % 2 == 0 ? "" : "BANK-" + i;
+            statement.add(new Entry(Source.STATEMENT, i + 2, ref, DAY.plusDays(i % 5), -6500, "IDR", ""));
+        }
+
+        var results = matcher.match(ledger, statement);
+
+        assertThat(results).filteredOn(r -> r.status() == MatchStatus.MATCHED).hasSize(n / 2);
+        assertThat(results).hasSize(n + n / 2);
     }
 }

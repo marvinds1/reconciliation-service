@@ -2,9 +2,11 @@ package io.github.marvinds1.reconciliation.web;
 
 import io.github.marvinds1.reconciliation.csv.InvalidFileException;
 import io.github.marvinds1.reconciliation.service.RunNotFoundException;
+import io.github.marvinds1.reconciliation.service.TooManyRunsException;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -24,6 +26,13 @@ public class ApiExceptionHandler {
     @ExceptionHandler(RunNotFoundException.class)
     ProblemDetail notFound(RunNotFoundException e) {
         return problem(HttpStatus.NOT_FOUND, "RUN_NOT_FOUND", e.getMessage());
+    }
+
+    @ExceptionHandler(TooManyRunsException.class)
+    ResponseEntity<ProblemDetail> busy(TooManyRunsException e) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header("Retry-After", "5")
+                .body(problem(HttpStatus.SERVICE_UNAVAILABLE, "TOO_MANY_RUNS", e.getMessage()));
     }
 
     @ExceptionHandler({IllegalArgumentException.class, ConstraintViolationException.class,

@@ -16,6 +16,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.Semaphore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -31,14 +32,19 @@ public class ReconciliationService {
     private final EntryCsvParser parser;
     private final int defaultToleranceDays;
     private final TransactionTemplate transaction;
+    private final Semaphore runPermits;
+    private final int maxConcurrentRuns;
 
     public ReconciliationService(ReconciliationRepository repository, PlatformTransactionManager transactionManager,
                                  @Value("${reconciliation.max-rows-per-file}") int maxRows,
-                                 @Value("${reconciliation.default-date-tolerance-days}") int defaultToleranceDays) {
+                                 @Value("${reconciliation.default-date-tolerance-days}") int defaultToleranceDays,
+                                 @Value("${reconciliation.max-concurrent-runs}") int maxConcurrentRuns) {
         this.repository = repository;
         this.parser = new EntryCsvParser(maxRows);
         this.defaultToleranceDays = defaultToleranceDays;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.maxConcurrentRuns = maxConcurrentRuns;
+        this.runPermits = new Semaphore(maxConcurrentRuns);
     }
 
     public record Outcome(ReconciliationRun run, boolean replayed) {
@@ -47,7 +53,8 @@ public class ReconciliationService {
     /**
      * Reconciles two files. Uploading the same pair of files with the same tolerance again returns
      * the original run instead of creating a second one. Parsing and matching happen outside the
-     * database transaction so large files do not hold a connection.
+     * database transaction so large files do not hold a connection. A bulkhead caps how many
+     * runs parse and match at once, so a burst of large uploads cannot exhaust memory or CPU.
      */
     public Outcome reconcile(UploadedFile ledgerFile, UploadedFile statementFile, Integer toleranceDays) {
         int tolerance = toleranceDays == null ? defaultToleranceDays : toleranceDays;
@@ -60,6 +67,17 @@ public class ReconciliationService {
             return new Outcome(existing.get(), true);
         }
 
+        if (!runPermits.tryAcquire()) {
+            throw new TooManyRunsException(maxConcurrentRuns);
+        }
+        try {
+            return run(ledgerFile, statementFile, tolerance, hash);
+        } finally {
+            runPermits.release();
+        }
+    }
+
+    private Outcome run(UploadedFile ledgerFile, UploadedFile statementFile, int tolerance, String hash) {
         List<Entry> ledger = parser.parse(Entry.Source.LEDGER, new ByteArrayInputStream(ledgerFile.content()));
         List<Entry> statement = parser.parse(Entry.Source.STATEMENT, new ByteArrayInputStream(statementFile.content()));
         List<MatchResult> results = new Matcher(tolerance).match(ledger, statement);

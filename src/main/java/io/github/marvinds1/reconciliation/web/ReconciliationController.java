@@ -97,9 +97,9 @@ public class ReconciliationController {
                     var l = item.ledger();
                     var s = item.statement();
                     csv.printRecord(item.status(), item.currency(),
-                            l == null ? null : l.line(), l == null ? null : l.reference(),
+                            l == null ? null : l.line(), l == null ? null : spreadsheetSafe(l.reference()),
                             l == null ? null : l.valueDate(), l == null ? null : l.amountMinor(),
-                            s == null ? null : s.line(), s == null ? null : s.reference(),
+                            s == null ? null : s.line(), s == null ? null : spreadsheetSafe(s.reference()),
                             s == null ? null : s.valueDate(), s == null ? null : s.amountMinor(),
                             item.differenceMinor());
                     afterId = item.id();
@@ -111,5 +111,17 @@ public class ReconciliationController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"exceptions-" + id + ".csv\"")
                 .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
                 .body(body);
+    }
+
+    /**
+     * References come from uploaded files and end up in a CSV opened by operations staff.
+     * A value starting with = + - @ (or tab / CR) would be evaluated as a spreadsheet formula,
+     * so it is prefixed with a quote (OWASP CSV injection guidance).
+     */
+    static String spreadsheetSafe(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        return "=+-@\t\r".indexOf(value.charAt(0)) >= 0 ? "'" + value : value;
     }
 }

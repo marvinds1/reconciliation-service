@@ -22,6 +22,22 @@ the ledger records money movements, this service proves that the bank saw the sa
 | Large results | Items are paged with keyset pagination (`afterId`); the exceptions CSV is streamed page by page instead of loading everything into memory. |
 | Schema | Flyway migrations, `CHECK` constraints on statuses, indexed by `(run_id, status, id)`. |
 
+## Security, performance and concurrency
+
+| Risk | Guard |
+|---|---|
+| Unauthenticated access | `X-API-Key` required on `/api/**` when `RECON_API_KEYS` is set (comma-separated, ≥16 chars, several keys for rotation), compared in constant time. Health stays public. API responses carry `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`. |
+| CSV / formula injection | References come from uploaded files and end up in a CSV that operations opens in Excel. Values starting with `=`, `+`, `-`, `@`, tab or CR are prefixed with `'` so they are never evaluated as formulas (OWASP guidance). |
+| Duplicate / concurrent uploads | Runs are keyed by a SHA-256 of both files and the tolerance with a unique constraint and `INSERT … ON CONFLICT DO NOTHING`. Tested with 8 simultaneous identical uploads: exactly one `201`, the rest replay the same run. |
+| Overload | A bulkhead (`RECON_MAX_CONCURRENT_RUNS`, default 4) caps how many runs parse and match at once; extra requests get `503` with `Retry-After` instead of exhausting memory. Upload size (20 MB per file), row count (200k) and page size (500) are limited. |
+| Holding DB connections | Parsing and matching happen outside the transaction; only the inserts are transactional. Pool size, connection timeout and a 30s query timeout are bounded. |
+| Quadratic matching | Pass 2 indexes candidates by amount, then date, then whether they carry a reference, so a file full of identical amounts (fees, standing orders) stays linear. 200k entries with the same amount match in ~0.4s in a unit test. |
+| Slow batch inserts | PostgreSQL JDBC `reWriteBatchedInserts=true` turns batches into multi-row inserts. |
+
+Measured end to end on an M-series laptop (local PostgreSQL in Docker): two files of 100k and 97k
+rows (~3.7 MB each) are parsed, matched and persisted in **~1.5 s**, versus ~2.9 s without batch
+rewriting. Exporting 3k exceptions as CSV takes ~70 ms.
+
 ## How matching works
 
 ```mermaid
@@ -68,7 +84,8 @@ TRF-1001,2026-11-02,-1500000.00,IDR,Transfer to supplier A
 ```
 
 ```bash
-curl -s -F ledgerFile=@samples/ledger.csv -F statementFile=@samples/statement.csv \
+curl -s -H "X-API-Key: $RECON_API_KEY" \
+     -F ledgerFile=@samples/ledger.csv -F statementFile=@samples/statement.csv \
      localhost:8080/api/v1/reconciliations
 ```
 
@@ -88,7 +105,7 @@ curl -s -F ledgerFile=@samples/ledger.csv -F statementFile=@samples/statement.cs
 ```
 
 Errors use RFC 7807 `application/problem+json` with a `code` (`INVALID_FILE`, `INVALID_REQUEST`,
-`RUN_NOT_FOUND`); `INVALID_FILE` lists the offending lines. OpenAPI UI: `/swagger-ui.html`.
+`RUN_NOT_FOUND`, `TOO_MANY_RUNS`, `UNAUTHORIZED`); `INVALID_FILE` lists the offending lines. OpenAPI UI: `/swagger-ui.html`.
 
 ## Running locally
 
@@ -98,6 +115,9 @@ Requirements: Java 17, Maven, Docker.
 docker compose up --build        # PostgreSQL + the service on :8080
 mvn verify                       # unit tests + integration tests (Testcontainers PostgreSQL)
 ```
+
+Configuration: `RECON_API_KEYS` (authentication is off with a startup warning when empty — local
+development only), `RECON_MAX_CONCURRENT_RUNS`, `DB_URL`, `DB_USERNAME`, `DB_PASSWORD`, `DB_POOL_SIZE`.
 
 Or run Postgres from compose and the app from your IDE: `docker compose up postgres`, then
 `mvn spring-boot:run`.
@@ -110,7 +130,7 @@ src/main/java/io/github/marvinds1/reconciliation/
   csv/           EntryCsvParser, InvalidFileException
   persistence/   JdbcTemplate repository, run/item read models
   service/       ReconciliationService (hashing, idempotency, transaction)
-  web/           REST controller, problem+json error handling
+  web/           REST controller, API key filter, problem+json error handling
 src/main/resources/db/migration   Flyway scripts
 samples/                          Example ledger and statement files
 ```
